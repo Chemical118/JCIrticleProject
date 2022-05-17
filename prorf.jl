@@ -118,8 +118,7 @@ module prorf
             predict_test = DecisionTree.predict(regr, x_test)
             predict_train = DecisionTree.predict(regr, x_train)
             scatter(vcat(y_train, y_test), vcat(predict_train, predict_test), color=vcat(["orange" for i = 1:length(y_train)], ["blue" for i = 1:length(y_test)]))
-            # PyPlot.title("Random Forest Regression Result")
-            PyPlot.title(nothing)
+            PyPlot.title("Random Forest Regression Result")
             xlabel("True Values")
             ylabel("Predictions")
             axis("equal")
@@ -134,6 +133,68 @@ module prorf
         return regr, _rf_importance(regr, DataFrame(x, get_amino_loc(s, loc)), imp_iter, seed=imp_state, show_number=show_number, val_mode=val_mode)::Vector{Float64}
     end
 
+    function iter_get_reg_importance(si::RFI, x::Matrix{Float64}, y::Vector{Float64}, loc::Vector{Tuple{Int, Char}}, feet::Int, tree::Int, iter::Int;
+        val_mode::Bool=false, split_size::Float64=0.3, show_number::Int=20, imp_iter::Int=60,
+        data_state::Int64=rand(0:typemax(Int64)), imp_state::Int64=rand(0:typemax(Int64)))
+        s = si.rf
+        x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=split_size, random_state=data_state)
+        f = zeros(length(loc), iter)
+        n = zeros(iter)
+
+        Threads.@threads for i in 1:iter
+            regr = RandomForestRegressor(n_trees=tree, max_depth=feet, min_samples_leaf=1)
+            DecisionTree.fit!(regr, x_train, y_train)
+            f[:, i] = _rf_importance(regr, DataFrame(x, get_amino_loc(s, loc)), imp_iter, seed=imp_state, show_number=show_number, val_mode=true)
+            n[i] = nrmse(regr, x_test, y_test)
+        end
+        mf, sf = mean(f, dims=2)[:, 1], std(f, dims=2)[:, 1]
+
+        if val_mode == false
+            _iter_get_reg_importance(mf, sf, get_amino_loc(s, loc), show_number=show_number)
+            @printf "NRMSE : %.6f" mean(n)
+        end
+
+        return mf, sf
+    end
+
+    function iter_get_reg_importance(s::RF, x::Matrix{Float64}, y::Vector{Float64}, loc::Vector{Tuple{Int, Char}}, feet::Int, tree::Int, iter::Int;
+        val_mode::Bool=false, split_size::Float64=0.3, show_number::Int=20, imp_iter::Int=60,
+        data_state::Int64=rand(0:typemax(Int64)), imp_state::Int64=rand(0:typemax(Int64)))
+        x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=split_size, random_state=data_state)
+        f = zeros(length(loc), iter)
+        n = zeros(iter)
+
+        Threads.@threads for i in 1:iter
+            regr = RandomForestRegressor(n_trees=tree, max_depth=feet, min_samples_leaf=1)
+            DecisionTree.fit!(regr, x_train, y_train)
+            f[:, i] = _rf_importance(regr, DataFrame(x, get_amino_loc(s, loc)), imp_iter, seed=imp_state, show_number=show_number, val_mode=true)
+            n[i] = nrmse(regr, x_test, y_test)
+        end
+        mf, sf = mean(f, dims=2)[:, 1], std(f, dims=2)[:, 1]
+
+        if val_mode == false
+            _iter_get_reg_importance(mf, sf, get_amino_loc(s, loc), show_number=show_number)
+            @printf "NRMSE : %.6f" mean(n)
+        end
+
+        return mf, sf
+    end
+    
+    function _iter_get_reg_importance(fe::Vector{Float64}, err::Vector{Float64}, loc::Vector{String}; show_number::Int=20)
+        norm_val = maximum(fe)
+        fe /= norm_val
+        err /= norm_val
+        sorted_idx = sortperm(fe, rev=true)
+        bar_pos = [length(sorted_idx):-1:1;] .- 0.5
+        barh(bar_pos[1:show_number], fe[sorted_idx][1:show_number], xerr=err[sorted_idx][1:show_number], align="center", capsize=2)
+        yticks(bar_pos[1:show_number], loc[sorted_idx][1:show_number])
+        xlabel("Feature Importance")
+        ylabel("Amino acid Location")
+        PyPlot.title("Relative Mean Absolute Shapley Value")
+        display(gcf())
+        close("all")
+    end
+
     function get_reg_value(si::RFI, x::Matrix{Float64}, y::Vector{Float64};
         val_mode::Bool=false, split_size::Float64=0.3, data_state::Int64=rand(0:typemax(Int64)), learn_state::Int64=rand(0:typemax(Int64)))
         x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=split_size, random_state=data_state)
@@ -141,20 +202,22 @@ module prorf
         task = [(i[1], j[1], i[2], j[2]) for i in enumerate(si.nfeat), j in enumerate(si.ntree)]
         
         Threads.@threads for (i, j, feat, tree) in task
-            regr = RandomForestRegressor(n_trees=tree, max_depth=feat, min_samples_leaf=1, rng=learn_state)
-            DecisionTree.fit!(regr, x_train, y_train)
-            z[i,  j] = nrmse(regr, x_test, y_test)
-            # @printf "%d %d %d \n" Threads.threadid() feat tree
+            z[i,  j] = _get_reg_value(x_train, x_test, y_train, y_test, feat, tree, learn_state)
         end
 
         if val_mode == false
             view_reg3d(si, z)
         end
-
         return z
     end
 
-    function view_reg3d(s::RFI, z::Matrix{Float64}; title="NRMSE value", c_format="%.3f", elev=nothing, azim=nothing, scale::Int=2)
+    function _get_reg_value(x_train::Matrix{Float64}, x_test::Matrix{Float64}, y_train::Vector{Float64}, y_test::Vector{Float64}, feat::Int, tree::Int, learn_state::Int64)
+        regr = RandomForestRegressor(n_trees=tree, max_depth=feat, min_samples_leaf=1, rng=learn_state)
+        DecisionTree.fit!(regr, x_train, y_train)
+        return nrmse(regr, x_test, y_test)
+    end
+
+    function view_reg3d(s::RFI, z::Matrix{Float64}; title=nothing, c_format=nothing, elev=nothing, azim=nothing, scale::Int=2)
         nfeat_list = [s.nfeat;]' .* ones(length(s.ntree))
         ntree_list = ones(length(s.nfeat))' .* [s.ntree;]
         fig = figure()
@@ -172,11 +235,23 @@ module prorf
         close("all")
     end
 
-    # function iter_get_reg_value(si::RFI, x::Matrix{Float64}, y::Vector{Float64}, iter::Int;
-    #     val_mode::Bool=false, split_size::Float64=0.3, data_state::Int64=rand(0:typemax(Int64)), learn_state::Int64=rand(0:typemax(Int64)))
-        
-        
-    # end
+    function iter_get_reg_value(si::RFI, x::Matrix{Float64}, y::Vector{Float64}, iter::Int;
+        val_mode::Bool=false, split_size::Float64=0.3, data_state::Int64=rand(0:typemax(Int64)))
+        z = zeros(length(si.nfeat), length(si.ntree), iter)
+        for i = 1:iter
+            z[:, :, i] = get_reg_value(si, x, y, val_mode=true, split_size=split_size, data_state=data_state)
+        end
+
+        vz, sz = mean(z, dims=3)[:, :, 1], std(z, dims=3)[:, :, 1]
+
+        if val_mode == false
+            view_reg3d(si, vz, title="NRMSE value", c_format="%.3f", scale=2)
+            view_reg3d(si, sz, title="NRMSE SD value", c_format="%.4f", scale=3)
+        end
+
+        return vz, sz
+    end
+
     function rf_importance(s::RF, regr::RandomForestRegressor, x::Matrix{Float64}, loc::Vector{Tuple{Int, Char}}, iter::Int=60; seed::Int64=rand(0:typemax(Int64)), val_mode::Bool=false)
         return _rf_importance(regr, DataFrame(x, get_amino_loc(s, loc)), iter, seed=seed, val_mode=val_mode)
     end
@@ -254,6 +329,14 @@ module prorf
     function nrmse(regr::RandomForestRegressor, test::Matrix{Float64}, tru::Vector{Float64})
         pre = DecisionTree.predict(regr, test)
         return rms(pre, tru) / (maximum(tru) - minimum(tru))
+    end
+
+    function view_sequence(s::RF, typ::String="fasta", fontsize::Int=9, plot_width::Int=800)
+        RFF.view_sequence(s.fasta_loc, s.amino_loc, typ=typ, fontsize=string(fontsize) * "pt", plot_width=plot_width)
+    end
+
+    function view_sequence(si::RFI, typ::String="fasta", fontsize::Int=9, plot_width::Int=800)
+        RFF.view_sequence(si.rf.fasta_loc, si.rf.amino_loc, typ=typ, fontsize=string(fontsize) * "pt", plot_width=plot_width)
     end
 
 end
