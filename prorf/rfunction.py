@@ -94,7 +94,7 @@ def blo62(pair):
     return matrix[pair]
 
 
-def view_sequence(floc, loc=0, typ='fasta', fontsize="9pt", plot_width=800):
+def view_sequence(floc, loc=0, typ="fasta", fontsize="9pt", plot_width=800):
     """Bokeh sequence alignment view
     https://dmnfarrell.github.io/bioinformatics/bokeh-sequence-aligner
     Edit by Chemical118"""

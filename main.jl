@@ -1,7 +1,7 @@
 include("prorf.jl")
 import .prorf as pf
 
-R = pf.RF("Data/rgpdata.fasta", "Data/rdata.xls")
-X, Y, L = pf.get_data(R, 9, 'B')
+R = pf.RFI("Data/rgpdata.fasta", "Data/rdata.xls", 2:1:4, 50:100:500)
+X, Y, L = pf.get_data(R, 9, 'C')
 
-M, Z = pf.get_reg_importance(R, X, Y, L, 5, 400, val_mode=true)
+pf.get_reg_value(R, X, Y)
