@@ -1,8 +1,7 @@
 module prorf
-    using ShapML, DataFrames, DecisionTree, MLJ
-    using PyCall, Random, Statistics, Printf
-    using PyPlot
-    
+    using ShapML, DataFrames, DecisionTree
+    using PyCall, Random, Statistics, Printf, MLJ, PyPlot
+
     pushfirst!(pyimport("sys")."path", "")
     RFC = pyimport("prorf.rfclass")
     RFF = pyimport("prorf.rfunction")
@@ -74,7 +73,7 @@ module prorf
             plot([-1000, 1000], [-1000, 1000], color="black")
             display(gcf())
             close("all")
-            @printf "NRMSE : %.6f" nrmse(predict_test, y_test)
+            @printf "NRMSE : %.6f\n" nrmse(predict_test, y_test)
         end
         return regr, _rf_importance(regr, DataFrame(x, get_amino_loc(s, loc)), imp_iter, seed=imp_state, show_number=show_number, val_mode=val_mode)
     end
@@ -101,7 +100,7 @@ module prorf
             plot([-1000, 1000], [-1000, 1000], color="black")
             display(gcf())
             close("all")
-            @printf "NRMSE : %.6f" nrmse(predict_test, y_test)
+            @printf "NRMSE : %.6f\n" nrmse(predict_test, y_test)
         end
         return regr, _rf_importance(regr, DataFrame(x, get_amino_loc(s, loc)), imp_iter, seed=imp_state, show_number=show_number, val_mode=val_mode)
     end
@@ -128,7 +127,7 @@ module prorf
             plot([-1000, 1000], [-1000, 1000], color="black")
             display(gcf())
             close("all")
-            @printf "NRMSE : %.6f" nrmse(predict_test, y_test)
+            @printf "NRMSE : %.6f\n" nrmse(predict_test, y_test)
         end
         return regr, _rf_importance(regr, DataFrame(x, get_amino_loc(s, loc)), imp_iter, seed=imp_state, show_number=show_number, val_mode=val_mode)::Vector{Float64}
     end
@@ -140,18 +139,15 @@ module prorf
         x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=split_size, random_state=data_state)
         f = zeros(length(loc), iter)
         n = zeros(iter)
-
-        Threads.@threads for i in 1:iter
-            regr = RandomForestRegressor(n_trees=tree, max_depth=feet, min_samples_leaf=1)
-            DecisionTree.fit!(regr, x_train, y_train)
-            f[:, i] = _rf_importance(regr, DataFrame(x, get_amino_loc(s, loc)), imp_iter, seed=imp_state, show_number=show_number, val_mode=true)
-            n[i] = nrmse(regr, x_test, y_test)
+        loc_list= get_amino_loc(s, loc)
+        for i in 1:iter
+            f[:, i], n[i] = _iter_get_reg_importance(x, x_train, x_test, y_train, y_test, loc_list, feet, tree, imp_iter, imp_state)
         end
         mf, sf = mean(f, dims=2)[:, 1], std(f, dims=2)[:, 1]
 
         if val_mode == false
-            _iter_get_reg_importance(mf, sf, get_amino_loc(s, loc), show_number=show_number)
-            @printf "NRMSE : %.6f" mean(n)
+            _iter_view_importance(mf, sf, get_amino_loc(s, loc), show_number=show_number)
+            @printf "NRMSE : %.6f\n" mean(n)
         end
 
         return mf, sf
@@ -163,24 +159,27 @@ module prorf
         x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=split_size, random_state=data_state)
         f = zeros(length(loc), iter)
         n = zeros(iter)
-
+        loc_list= get_amino_loc(s, loc)
         Threads.@threads for i in 1:iter
-            regr = RandomForestRegressor(n_trees=tree, max_depth=feet, min_samples_leaf=1)
-            DecisionTree.fit!(regr, x_train, y_train)
-            f[:, i] = _rf_importance(regr, DataFrame(x, get_amino_loc(s, loc)), imp_iter, seed=imp_state, show_number=show_number, val_mode=true)
-            n[i] = nrmse(regr, x_test, y_test)
+            f[:, i], n[i] = _iter_get_reg_importance(x, x_train, x_test, y_train, y_test, loc_list, feet, tree, imp_iter, imp_state)
         end
         mf, sf = mean(f, dims=2)[:, 1], std(f, dims=2)[:, 1]
 
         if val_mode == false
-            _iter_get_reg_importance(mf, sf, get_amino_loc(s, loc), show_number=show_number)
-            @printf "NRMSE : %.6f" mean(n)
+            _iter_view_importance(mf, sf, get_amino_loc(s, loc), show_number=show_number)
+            @printf "NRMSE : %.6f\n" mean(n)
         end
 
         return mf, sf
     end
+
+    function _iter_get_reg_importance(x::Matrix{Float64}, x_train::Matrix{Float64}, x_test::Matrix{Float64}, y_train::Vector{Float64}, y_test::Vector{Float64}, loc::Vector{String}, feet::Int, tree::Int, imp_iter::Int, imp_state::Int64)
+        regr = RandomForestRegressor(n_trees=tree, max_depth=feet, min_samples_leaf=1)
+        DecisionTree.fit!(regr, x_train, y_train)
+        return _rf_importance(regr, DataFrame(x, loc), imp_iter, seed=imp_state, val_mode=true) , nrmse(regr, x_test, y_test)
+    end
     
-    function _iter_get_reg_importance(fe::Vector{Float64}, err::Vector{Float64}, loc::Vector{String}; show_number::Int=20)
+    function _iter_view_importance(fe::Vector{Float64}, err::Vector{Float64}, loc::Vector{String}; show_number::Int=20)
         norm_val = maximum(fe)
         fe /= norm_val
         err /= norm_val
