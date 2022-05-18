@@ -1,3 +1,4 @@
 *.html linguist-detectable=false
 *.gp linguist-detectable=false
 *.pep linguist-detectable=false
+example.ipynb linguist-detectable=false
