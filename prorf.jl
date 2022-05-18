@@ -81,6 +81,7 @@ module prorf
     function get_reg_importance(si::RFI, x::Matrix{Float64}, y::Vector{Float64}, loc::Vector{Tuple{Int, Char}}, feet::Int, tree::Int; 
         val_mode::Bool=false, split_size::Float64=0.3, show_number::Int=20, imp_iter::Int=60,
         data_state::Int64=rand(0:typemax(Int64)), learn_state::Int64=rand(0:typemax(Int64)), imp_state::Int64=rand(0:typemax(Int64)))
+        
         s = si.rf
         x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=split_size, random_state=data_state)
         regr = RandomForestRegressor(n_trees=tree, n_subfeatures=feet, min_samples_leaf=1, rng=learn_state)
