@@ -2,7 +2,9 @@
 #### Using Random Forest in enzyme for various variables at Julia
 
 Imported Project at [ASCIrticleProject](https://github.com/Chemical118/ASCIrticleProject) Python to Julia  
-Please read [example.ipynb](https://github.com/Chemical118/JCIrticleProject/blob/master/example.ipynb) to get a example
+Please read [main.ipynb](https://github.com/Chemical118/JCIrticleProject/blob/master/main.ipynb) to get a example
+
+Use only non-underbar starting function; functions start with underbar are backend only  
 
 ## Julia Module Description
 `RF` : Random Forest Struct  
