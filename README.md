@@ -1,4 +1,4 @@
-# ASCIrticle Project by Julia
+# ASCIrticle Project with Julia
 #### Using Random Forest in enzyme for various variables at Julia
 
 Imported Project at [ASCIrticleProject](https://github.com/Chemical118/ASCIrticleProject) Python to Julia  
