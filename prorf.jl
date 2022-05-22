@@ -44,8 +44,7 @@ module prorf
         end
     end
 
-    function _max_value_key(d::Dict{Char, Int})
-        tar = maximum(values(d))
+    function _find_key(d::Dict{Char, Int}, tar::Int)
         for k in keys(d)
             if d[k] == tar
                 return k
@@ -54,8 +53,16 @@ module prorf
     end
 
     function get_data(s::AbstractRF, ami_arr::Int, excel_loc::Char; norm::Bool=false, blosum::Int=62)
-        data_len, loc_dict_vector = _location_dict_vector(s.fasta_loc)
+        data_len, loc_dict_vector, seq_matrix = _location_data(s.fasta_loc)
         blo = blosum_number(blosum)
+        for (ind, (dict, col)) in enumerate(zip(loc_dict_vector, eachcol(seq_matrix)))
+            max_num = maximum(values(dict))
+            max_amino = _find_key(dict, max_num)
+            if '-' ∉ keys(dict) && data_len - max_num ≥ ami_arr
+                println(ind)
+            end
+
+        end
         # return Matrix{Float64}(A), Vector{Float64}(B), Vector{Tuple{Int, Char}}([(C[i, 1], only(C[i, 2])) for i = 1:size(C, 1)])
     end
 
@@ -72,7 +79,7 @@ module prorf
     end
 
     function _view_mutation(fasta_loc::String)
-        data_len, loc_dict_vector = _location_dict_vector(fasta_loc)
+        data_len, loc_dict_vector, _ = _location_data(fasta_loc)
         loc_vector = zeros(Int, data_len)
         loc_hist_vector = Vector()
         for dict in loc_dict_vector
@@ -103,7 +110,7 @@ module prorf
         close("all")
     end
 
-    function _location_dict_vector(fasta_loc::String)
+    function _location_data(fasta_loc::String)
         reader = open(FASTA.Reader, fasta_loc)
         seq_vector = [collect(FASTA.sequence(String, record)) for record in reader]
         if length(Set(map(length, seq_vector))) ≠ 1
@@ -118,7 +125,7 @@ module prorf
             end
             push!(loc_vector, loc_dict)
         end
-        return size(seq_matrix)[1], loc_vector
+        return size(seq_matrix)[1], loc_vector, seq_matrix
     end
 
     function get_reg_importance(s::AbstractRF, x::Matrix{Float64}, y::Vector{Float64}, loc::Vector{Tuple{Int, Char}}, feet::Int, tree::Int; 
