@@ -30,7 +30,11 @@ module prorf
 
     function __init__()
         py"""
-        def _view_sequence(floc, loc=0, typ='fasta', fontsize="9pt", plot_width=800, show_seq=False):
+        def _python_install(package):
+            import subprocess, sys
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+        def _view_sequence(aln, loc=0, typ='fasta', fontsize="9pt", plot_width=800, show_seq=False):
             # Bokeh sequence alignment view
             # https://dmnfarrell.github.io/bioinformatics/bokeh-sequence-aligner
             # Edit by Chemical118
@@ -39,7 +43,6 @@ module prorf
             from bokeh.models.glyphs import Text, Rect
             from bokeh.layouts import gridplot
             from bokeh.core.properties import value
-            from Bio import SeqIO
 
             import numpy as np
 
@@ -49,7 +52,6 @@ module prorf
                     'X': 'white'}
             
             # make sequence and id lists from the aln object
-            aln = list(SeqIO.parse(floc, typ))
             seqs = [rec.seq for rec in aln]
             ids = [rec.id for rec in aln]
             text = [it for s in list(seqs) for it in s]
@@ -436,6 +438,14 @@ module prorf
     end
 
     function view_sequence(s::AbstractRF, typ::String="fasta", fontsize::Int=9, plot_width::Int=800; val_mode=false)
-        py"_view_sequence"(s.fasta_loc, s.amino_loc, typ=typ, fontsize=string(fontsize) * "pt", plot_width=plot_width, show_seq=val_mode)
+        reader = open(FASTA.Reader, s.fasta_loc)
+        seq_vector = [collect(FASTA.sequence(String, record)) for record in reader]
+        py"_view_sequence"(seq_vector, s.amino_loc, typ=typ, fontsize=string(fontsize) * "pt", plot_width=plot_width, show_seq=val_mode)
+    end
+
+    function install_python()
+        py"_python_install"("numpy")
+        py"_python_install"("matplotlib")
+        py"_python_install"("bokeh")
     end
 end
