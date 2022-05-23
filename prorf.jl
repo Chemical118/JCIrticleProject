@@ -1,6 +1,6 @@
 module prorf
     using ShapML, DataFrames, DecisionTree
-    using Random, Statistics, Printf, PyPlot, StatsBase
+    using PyCall, Random, Statistics, Printf, PyPlot, StatsBase
     using FASTX, BioAlignments, XLSX
 
     abstract type AbstractRF end
@@ -28,6 +28,91 @@ module prorf
         return RFI(fasta_loc, data_loc, 0, nfeat, ntree)
     end
 
+    function __init__()
+        py"""
+        def _view_sequence(floc, loc=0, typ='fasta', fontsize="9pt", plot_width=800, show_seq=False):
+            # Bokeh sequence alignment view
+            # https://dmnfarrell.github.io/bioinformatics/bokeh-sequence-aligner
+            # Edit by Chemical118
+            from bokeh.plotting import figure, output_file, show
+            from bokeh.models import ColumnDataSource, Range1d
+            from bokeh.models.glyphs import Text, Rect
+            from bokeh.layouts import gridplot
+            from bokeh.core.properties import value
+            from Bio import SeqIO
+
+            import numpy as np
+
+            clrs = {'E': 'red', 'D': 'red', 'P': 'orange', 'A': 'orange', 'V': 'orange', 'H': 'orange', 'M': 'orange',
+                    'L': 'orange', 'I': 'orange', 'G': 'orange', 'K': 'blue', 'R': 'blue', 'N': 'green', 'C': 'green',
+                    'T': 'green', 'Q': 'green', 'S': 'green', 'F': 'yellow', 'Y': 'yellow', 'W': 'yellow', '-': 'white',
+                    'X': 'white'}
+            
+            # make sequence and id lists from the aln object
+            aln = list(SeqIO.parse(floc, typ))
+            seqs = [rec.seq for rec in aln]
+            ids = [rec.id for rec in aln]
+            text = [it for s in list(seqs) for it in s]
+            colors = [clrs[it] for it in text]
+            n = len(seqs[0])
+            s = len(seqs)
+            # var = .4
+            x = np.arange(1 + loc, n + 1 + loc)
+            y = np.arange(0, s, 1)
+            # creates a 2D grid of coords from the 1D arrays
+            xx, yy = np.meshgrid(x, y)
+            # flattens the arrays
+            gx = xx.ravel()
+            gy = yy.flatten()
+            # use recty for rect coords with an offset
+            recty = gy + .5
+            # var = 1 / s
+            # now we can create the ColumnDataSource with all the arrays
+            source = ColumnDataSource(dict(x=gx, y=gy, recty=recty, text=text, colors=colors))
+            plot_height = len(seqs) * 15 + 50
+            x_range = Range1d(loc, n + loc + 1, bounds='auto')
+            if n > 100:
+                viewlen = 100
+            else:
+                viewlen = n
+            # view_range is for the close up view
+            view_range = (0 + loc, viewlen + loc)
+            tools = "xpan, xwheel_zoom, reset, save"
+
+            # entire sequence view (no text, with zoom)
+            p = figure(title=None, plot_width=plot_width, plot_height=50,
+                    x_range=x_range, y_range=(0, s), tools=tools,
+                    min_border=0, toolbar_location='below')
+            rects = Rect(x="x", y="recty", width=1, height=1, fill_color="colors",
+                        line_color=None, fill_alpha=0.6)
+            p.add_glyph(source, rects)
+            p.yaxis.visible = False
+            p.grid.visible = False
+
+            # sequence text view with ability to scroll along x-axis
+            p1 = figure(title=None, plot_width=plot_width, plot_height=plot_height,
+                        x_range=view_range, y_range=ids, tools="xpan,reset",
+                        min_border=0, toolbar_location='below')  # , lod_factor=1)
+            glyph = Text(x="x", y="y", text="text", text_align='center', text_color="black",
+                        text_font=value("arial"), text_font_size=fontsize)
+            rects = Rect(x="x", y="recty", width=1, height=1, fill_color="colors",
+                        line_color=None, fill_alpha=0.4)
+            p1.add_glyph(source, glyph)
+            p1.add_glyph(source, rects)
+
+            p1.grid.visible = False
+            p1.xaxis.major_label_text_font_style = "bold"
+            p1.yaxis.minor_tick_line_width = 0
+            p1.yaxis.major_tick_line_width = 0
+
+            p = gridplot([[p], [p1]], toolbar_location='below')
+
+            output_file('Data/View/' + floc.split('/')[-1].split('.')[0] + '.html')
+            if not show_seq:
+                show(p)
+        """
+    end
+
     function blosum(blosum_num::Int)
         if blosum_num == 45
             return BLOSUM45
@@ -43,6 +128,8 @@ module prorf
             error(@sprintf "There are no Matrix such as BLOSUM%d" blosum_num)
         end
     end
+
+
 
     function _find_key(d::Dict{Char, Int}, tar::Int)
         for k in keys(d)
@@ -348,7 +435,7 @@ module prorf
         return L2dist(DecisionTree.predict(regr, test), tru) / (maximum(tru) - minimum(tru)) / length(tru)^0.5
     end
 
-    function view_sequence(s::AbstractRF, typ::String="fasta", fontsize::Int=9, plot_width::Int=800)
-        RFF.view_sequence(s.fasta_loc, s.amino_loc, typ=typ, fontsize=string(fontsize) * "pt", plot_width=plot_width)
+    function view_sequence(s::AbstractRF, typ::String="fasta", fontsize::Int=9, plot_width::Int=800; val_mode=false)
+        py"_view_sequence"(s.fasta_loc, s.amino_loc, typ=typ, fontsize=string(fontsize) * "pt", plot_width=plot_width, show_seq=val_mode)
     end
 end
