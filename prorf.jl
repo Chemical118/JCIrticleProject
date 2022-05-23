@@ -131,8 +131,6 @@ module prorf
         end
     end
 
-
-
     function _find_key(d::Dict{Char, Int}, tar::Int)
         for k in keys(d)
             if d[k] == tar
@@ -443,7 +441,7 @@ module prorf
         py"_view_sequence"(seq_vector, s.amino_loc, typ=typ, fontsize=string(fontsize) * "pt", plot_width=plot_width, show_seq=val_mode)
     end
 
-    function install_python()
+    function install_python_dependency()
         py"_python_install"("numpy")
         py"_python_install"("matplotlib")
         py"_python_install"("bokeh")
