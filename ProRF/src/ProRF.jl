@@ -1,7 +1,13 @@
-module prorf
+module ProRF
     using ShapML, DataFrames, DecisionTree
     using PyCall, Random, Statistics, Printf, PyPlot, StatsBase
-    using FASTX, BioAlignments, XLSX
+    using FASTX, BioAlignments, XLSX, Phylo, AxisArrays
+    
+    # export RF, RFI
+    # export blosum, get_data, get_amino_loc, view_mutation, view_reg3d, view_importance, view_sequence
+    # export train_test_split, nrmse, install_python_dependency
+    # export get_reg_importance, iter_get_reg_importance, iter_view_importance
+    # export get_reg_value, get_reg_value_loc, iter_get_reg_value, rf_importance
 
     abstract type AbstractRF end
     abstract type AbstractRFI <: AbstractRF end
@@ -147,6 +153,12 @@ module prorf
         _get_data(s, 1, excel_col, norm, blosum, sheet, title)
     end
 
+    function _min_max_norm(ve::Vector{Float64})
+        mi = minimum(ve)
+        ma = maximum(ve)
+        return [(i - mi) / (ma - mi) for i in ve]
+    end
+
     function _get_data(s::AbstractRF, ami_arr::Int, excel_col::Char, norm::Bool, blonum::Int, sheet::String, title::Bool)
         data_len, loc_dict_vector, seq_matrix = _location_data(s.fasta_loc)
         blo = blosum(blonum)
@@ -162,9 +174,13 @@ module prorf
         end
 
         excel_data = DataFrame(XLSX.readtable(s.data_loc, sheet, infer_eltypes=title)...)
+        excel_select_vector = excel_data[!, Int(excel_col) - Int('A') + 1]
+        if norm
+            excel_select_vector = _min_max_norm(excel_select_vector)
+        end
         
         x = Matrix{Float64}(hcat(x_col_vector...))
-        y = Vector{Float64}(excel_data[!, Int(excel_col) - Int('A') + 1])
+        y = Vector{Float64}(excel_select_vector)
         l = Vector{Tuple{Int, Char}}(loc_vector)
         return x, y, l
     end
@@ -229,6 +245,15 @@ module prorf
             push!(loc_vector, loc_dict)
         end
         return size(seq_matrix)[1], loc_vector, seq_matrix
+    end
+
+    function fill_gap(in_fasta_loc::String, in_tree_loc::String, out_fasta_loc::String)
+        reader = open(FASTA.Reader, in_fasta_loc)
+        seq_vector = [collect(FASTA.sequence(String, record)) for record in reader]
+        if length(Set(map(length, seq_vector))) ≠ 1
+            error(@sprintf "%s is not aligned, Please align your data" fasta_loc)
+        end
+        seq_matrix = permutedims(hcat(seq_vector...))
     end
 
     function get_reg_importance(s::AbstractRF, x::Matrix{Float64}, y::Vector{Float64}, loc::Vector{Tuple{Int, Char}}, feet::Int, tree::Int; 
@@ -439,6 +464,12 @@ module prorf
         reader = open(FASTA.Reader, s.fasta_loc)
         seq_vector = [collect(FASTA.sequence(String, record)) for record in reader]
         py"_view_sequence"(seq_vector, s.amino_loc, typ=typ, fontsize=string(fontsize) * "pt", plot_width=plot_width, show_seq=val_mode)
+    end
+
+    function view_sequence(fasta_loc::String, typ::String="fasta", fontsize::Int=9, plot_width::Int=800; val_mode=false)
+        reader = open(FASTA.Reader, fasta_loc)
+        seq_vector = [collect(FASTA.sequence(String, record)) for record in reader]
+        py"_view_sequence"(seq_vector, amino_loc, typ=typ, fontsize=string(fontsize) * "pt", plot_width=plot_width, show_seq=val_mode)
     end
 
     function install_python_dependency()
