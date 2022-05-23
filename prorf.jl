@@ -1,7 +1,7 @@
 module prorf
     using ShapML, DataFrames, DecisionTree
     using Random, Statistics, Printf, PyPlot, StatsBase
-    using FASTX, BioAlignments
+    using FASTX, BioAlignments, XLSX
 
     abstract type AbstractRF end
     abstract type AbstractRFI <: AbstractRF end
@@ -28,7 +28,7 @@ module prorf
         return RFI(fasta_loc, data_loc, 0, nfeat, ntree)
     end
 
-    function blosum_number(blosum_num::Int)
+    function blosum(blosum_num::Int)
         if blosum_num == 45
             return BLOSUM45
         elseif blosum_num == 50
@@ -52,18 +52,34 @@ module prorf
         end
     end
 
-    function get_data(s::AbstractRF, ami_arr::Int, excel_loc::Char; norm::Bool=false, blosum::Int=62)
-        data_len, loc_dict_vector, seq_matrix = _location_data(s.fasta_loc)
-        blo = blosum_number(blosum)
-        for (ind, (dict, col)) in enumerate(zip(loc_dict_vector, eachcol(seq_matrix)))
-            max_num = maximum(values(dict))
-            max_amino = _find_key(dict, max_num)
-            if '-' ∉ keys(dict) && data_len - max_num ≥ ami_arr
-                println(ind)
-            end
+    function get_data(s::AbstractRF, ami_arr::Int, excel_col::Char; norm::Bool=false, blosum::Int=62, sheet="Sheet1", title::Bool=true)
+        _get_data(s, ami_arr, excel_col, norm, blosum, sheet, title)
+    end
 
+    function get_data(s::AbstractRF, excel_col::Char; norm::Bool=false, blosum::Int=62, sheet="Sheet1", title::Bool=true)
+        _get_data(s, 1, excel_col, norm, blosum, sheet, title)
+    end
+
+    function _get_data(s::AbstractRF, ami_arr::Int, excel_col::Char, norm::Bool, blonum::Int, sheet::String, title::Bool)
+        data_len, loc_dict_vector, seq_matrix = _location_data(s.fasta_loc)
+        blo = blosum(blonum)
+        x_col_vector = Vector{Vector{Float64}}()
+        loc_vector = Vector{Tuple{Int, Char}}()
+        for (ind, (dict, col)) in enumerate(zip(loc_dict_vector, eachcol(seq_matrix)))
+            max_val = maximum(values(dict))
+            max_amino = _find_key(dict, max_val)
+            if '-' ∉ keys(dict) && ami_arr ≤ data_len - max_val 
+                push!(x_col_vector, [blo[max_amino, i] for i in col])
+                push!(loc_vector, (ind, max_amino))
+            end
         end
-        # return Matrix{Float64}(A), Vector{Float64}(B), Vector{Tuple{Int, Char}}([(C[i, 1], only(C[i, 2])) for i = 1:size(C, 1)])
+
+        excel_data = DataFrame(XLSX.readtable(s.data_loc, sheet, infer_eltypes=title)...)
+        
+        x = Matrix{Float64}(hcat(x_col_vector...))
+        y = Vector{Float64}(excel_data[!, Int(excel_col) - Int('A') + 1])
+        l = Vector{Tuple{Int, Char}}(loc_vector)
+        return x, y, l
     end
 
     function get_amino_loc(s::AbstractRF, loc::Vector{Tuple{Int, Char}})
