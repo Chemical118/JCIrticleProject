@@ -390,7 +390,6 @@ function _get_data(s::AbstractRF, ami_arr::Int, excel_col::Char, norm::Bool, blo
         if '-' ∉ keys(dict) && ami_arr ≤ data_len - max_val 
             push!(x_col_vector, [blo[max_amino, i] for i in col])
             push!(loc_vector, (ind, max_amino))
-            print(seq_matrix[1, ind])
         end
     end
 
@@ -400,7 +399,6 @@ function _get_data(s::AbstractRF, ami_arr::Int, excel_col::Char, norm::Bool, blo
         excel_select_vector = _min_max_norm(excel_select_vector)
     end
     
-    println(size(hcat(x_col_vector...)))
     x = Matrix{Float64}(hcat(x_col_vector...))
     y = Vector{Float64}(excel_select_vector)
     l = Vector{Tuple{Int, Char}}(loc_vector)
