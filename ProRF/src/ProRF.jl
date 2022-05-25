@@ -5,9 +5,10 @@ module ProRF
     
     # export RF, RFI
     # export blosum, get_data, get_amino_loc, view_mutation, view_reg3d, view_importance, view_sequence
-    # export train_test_split, nrmse, install_python_dependency
+    # export train_test_split, nrmse, install_python_dependency, data_preprocess
     # export get_reg_importance, iter_get_reg_importance, iter_view_importance
     # export get_reg_value, get_reg_value_loc, iter_get_reg_value, rf_importance
+    # export data_preprocess_fill, data_preprocess_index
 
     abstract type AbstractRF end
     abstract type AbstractRFI <: AbstractRF end
@@ -40,7 +41,7 @@ module ProRF
             import subprocess, sys
             subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
-        def _view_sequence(floc, seqs, ids, loc, typ='fasta', fontsize="9pt", plot_width=800, show_seq=False):
+        def _view_sequence(floc, seqs, ids, loc, fontsize="9pt", plot_width=800, show_seq=False, save_seq=True):
             # Bokeh sequence alignment view
             # https://dmnfarrell.github.io/bioinformatics/bokeh-sequence-aligner
             # Edit by Chemical118
@@ -55,7 +56,7 @@ module ProRF
             clrs = {'E': 'red', 'D': 'red', 'P': 'orange', 'A': 'orange', 'V': 'orange', 'H': 'orange', 'M': 'orange',
                     'L': 'orange', 'I': 'orange', 'G': 'orange', 'K': 'blue', 'R': 'blue', 'N': 'green', 'C': 'green',
                     'T': 'green', 'Q': 'green', 'S': 'green', 'F': 'yellow', 'Y': 'yellow', 'W': 'yellow', '-': 'white',
-                    'X': 'white'}
+                    'X': 'white', '.': 'white'}
             
             # make sequence and id lists from the aln object
             text = [it for s in list(seqs) for it in s]
@@ -77,10 +78,10 @@ module ProRF
             source = ColumnDataSource(dict(x=gx, y=gy, recty=recty, text=text, colors=colors))
             plot_height = len(seqs) * 15 + 50
             x_range = Range1d(loc, n + loc + 1, bounds='auto')
-            if n > 100:
+            if n > 99:
                 viewlen = 100
             else:
-                viewlen = n
+                viewlen = n + 1
             # view_range is for the close up view
             view_range = (0 + loc, viewlen + loc)
             tools = "xpan, xwheel_zoom, reset, save"
@@ -113,7 +114,9 @@ module ProRF
 
             p = gridplot([[p], [p1]], toolbar_location='below')
 
-            output_file('Data/View/' + floc.split('/')[-1].split('.')[0] + '.html')
+            if save_seq:
+                output_file('Data/View/' + floc.split('/')[-1].split('.')[0] + '.html')
+                
             if not show_seq:
                 show(p)
         """
@@ -244,41 +247,100 @@ module ProRF
         return size(seq_matrix)[1], loc_vector, seq_matrix
     end
 
-    function data_preprocess(in_fasta_loc::String, newick_loc::String, out_fasta_loc::String; target_rate::Float64=0.3)
-        data_len, loc_dict_vector, seq_matrix = _location_data(in_fasta_loc)
-        dis_matrix = distances(open(parsenewick, newick_loc))
+    function data_preprocess_index(in_fasta_loc::String; target_rate::Float64=0.3, val_mode::Bool=false)
+        data_len, loc_dict_vector, _ = _location_data(in_fasta_loc)
 
         seq_vector = Vector{String}()
         id_vector = Vector{String}()
-        id_dict = Dict{String, Int}()
 
-        for (ind, record) in enumerate(open(FASTA.Reader, "Data/algpdata.fasta"))
-            record_id = FASTA.identifier(record)
-            id_dict[record_id] = ind
-            push!(id_vector, record_id)
+        for record in open(FASTA.Reader, in_fasta_loc)
+            push!(id_vector, FASTA.identifier(record))
             push!(seq_vector, FASTA.sequence(String, record))
-        end
-
-        if Set(id_vector) ≠ Set(AxisArrays.axes(dis_matrix, 1))
-            error("Make sure the data same name of tree and id of fasta file")
         end
 
         gap_fre_vector = [get(dict, '-', 0) / data_len for dict in loc_dict_vector]
 
         front_ind = findfirst(x -> x ≤ target_rate, gap_fre_vector)
         last_ind = findlast(x -> x ≤ target_rate, gap_fre_vector)
-
-        seq_vector = [seq[front_ind:last_ind] for seq in seq_vector]
         seq_len = last_ind - front_ind + 1
+        
+        seq_vector = [seq[front_ind:last_ind] for seq in seq_vector]
 
+        if seq_len ≥ 100
+            _view_sequence(in_fasta_loc, [seq[1:45] * '.' ^ 9 * seq[end-44:end] for seq in seq_vector], id_vector, val_mode=val_mode, save_view=false)
+        else
+            _view_sequence(in_fasta_loc, seq_vector, id_vector, val_mode=val_mode, save_view=false)
+        end
+
+        return front_ind, last_ind
+    end
+
+    function data_preprocess_fill(front_ind::Int, last_ind::Int, in_fasta_loc::String, newick_loc::String, out_fasta_loc::String; val_mode::Bool=false)
+        dis_matrix = distances(open(parsenewick, newick_loc))
+        seq_vector = Vector{String}()
+        id_vector = Vector{String}()
+        id_dict = Dict{String, Int}()
+
+        for (ind, record) in enumerate(open(FASTA.Reader, in_fasta_loc))
+            record_id = FASTA.identifier(record)
+            id_dict[record_id] = ind
+            push!(id_vector, record_id)
+            push!(seq_vector, FASTA.sequence(String, record)[front_ind:last_ind])
+        end
+
+        if length(Set(map(length, seq_vector))) ≠ 1
+            error(@sprintf "%s is not aligned, Please align your data" fasta_loc)
+        end
+
+        seq_len = length(seq_vector[1])
+        if Set(id_vector) ≠ Set(AxisArrays.axes(dis_matrix, 1))
+            error("Make sure the data same name of tree and id of fasta file")
+        end
+
+        gap_ind_vector = Vector{Tuple{Int, Int}}()
+        isgap_vector = Vector{Bool}()
         for seq in seq_vector
             front_gap_ind = findfirst(!isequal('-'), seq)
             last_gap_ind = findlast(!isequal('-'), seq)
-            # @printf "%d %d\n" front_gap_ind last_gap_ind
+            push!(isgap_vector, front_gap_ind > 2 || last_gap_ind < seq_len - 1)
+            push!(gap_ind_vector, (front_gap_ind, last_gap_ind))
         end
 
-        println(seq_len)
+        if any(isgap_vector)
+            println("<Join data --> Target>")
+        else
+            println("There are no gap in data!")
+            return
+        end
 
+        dis_matrix_id_vector = AxisArrays.axes(dis_matrix, Axis{1})
+        dis_matrix_isgap_vector = [isgap_vector[id_dict[id]] for id in dis_matrix_id_vector]
+
+        edit_seq_vector = Vector{String}()
+        for (ind, (front_gap_ind, last_gap_ind)) in enumerate(gap_ind_vector)
+            main_seq = seq_vector[ind]
+            if isgap_vector[ind] == true
+                nogap_dis_vector = map(i -> Float64(dis_matrix_isgap_vector[i[1]] == true ? 1 : i[2]), enumerate(dis_matrix[:, id_vector[ind]]))
+                min_target_ind = id_dict[dis_matrix_id_vector[argmin(nogap_dis_vector)]]
+                min_target_seq = seq_vector[min_target_ind]
+
+                if front_gap_ind > 2
+                    main_seq = min_target_seq[1:front_gap_ind - 1] * main_seq[front_gap_ind:end]
+                end
+
+                if last_gap_ind < seq_len - 1
+                    main_seq = main_seq[1:last_gap_ind] * main_seq[last_gap_ind + 1:end]
+                end
+                @printf "%s --> %s\n" id_vector[min_target_ind] id_vector[ind]
+            end
+            push!(edit_seq_vector, main_seq)
+        end
+
+        open(FASTA.Writer, out_fasta_loc) do io
+            for (seq, id) in zip(edit_seq_vector, id_vector)
+                write(io, FASTA.Record(id, seq))
+            end
+        end
     end
 
     function get_reg_importance(s::AbstractRF, x::Matrix{Float64}, y::Vector{Float64}, loc::Vector{Tuple{Int, Char}}, feet::Int, tree::Int; 
@@ -485,16 +547,20 @@ module ProRF
         return L2dist(DecisionTree.predict(regr, test), tru) / (maximum(tru) - minimum(tru)) / length(tru)^0.5
     end
 
-    function view_sequence(s::AbstractRF; typ::String="fasta", fontsize::Int=9, plot_width::Int=800, val_mode=false)
+    function view_sequence(s::AbstractRF; fontsize::Int=9, plot_width::Int=800, val_mode=false)
         seq_vector = [FASTA.sequence(String, record) for record in open(FASTA.Reader, s.fasta_loc)]
         id_vector = [FASTA.identifier(record) for record in open(FASTA.Reader, s.fasta_loc)]
-        py"_view_sequence"(s.fasta_loc, seq_vector, id_vector, s.amino_loc, typ=typ, fontsize=string(fontsize) * "pt", plot_width=plot_width, show_seq=val_mode)
+        _view_sequence(s.fasta_loc, seq_vector, id_vector, s.amino_loc, fontsize * "pt", plot_width, val_mode=val_mode)
     end
 
-    function view_sequence(fasta_loc::String, amino_loc::Int=0; typ::String="fasta", fontsize::Int=9, plot_width::Int=800, val_mode=false)
+    function view_sequence(fasta_loc::String, amino_loc::Int=0; fontsize::Int=9, plot_width::Int=800, val_mode=false)
         seq_vector = [FASTA.sequence(String, record) for record in open(FASTA.Reader, fasta_loc)]
         id_vector = [FASTA.identifier(record) for record in open(FASTA.Reader, fasta_loc)]
-        py"_view_sequence"(fasta_loc, seq_vector, id_vector, amino_loc, typ=typ, fontsize=string(fontsize) * "pt", plot_width=plot_width, show_seq=val_mode)
+        _view_sequence(fasta_loc, seq_vector, id_vector, amino_loc, fontsize, plot_width, val_mode=val_mode)
+    end
+
+    function _view_sequence(fasta_loc::String, seq_vector::Vector{String}, id_vector::Vector{String}, amino_loc::Int=0, fontsize::Int=9, plot_width::Int=800; val_mode::Bool=false, save_view::Bool=true)
+        py"_view_sequence"(fasta_loc, seq_vector, id_vector, amino_loc, fontsize=string(fontsize) * "pt", plot_width=plot_width, show_seq=val_mode, save_seq=save_view)
     end
 
     function install_python_dependency()
