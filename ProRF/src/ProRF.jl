@@ -117,16 +117,10 @@ function predict_data(regr::RandomForestRegressor, loc::Vector{Tuple{Int, Char}}
     return DecisionTree.predict(regr, hcat(test_vector...)')
 end
 
-function view_sequence(s::AbstractRF; fontsize::Int=9, plot_width::Int=800, val_mode=false)
-    seq_vector = [FASTA.sequence(String, record) for record in open(FASTA.Reader, s.fasta_loc)]
-    id_vector = [FASTA.identifier(record) for record in open(FASTA.Reader, s.fasta_loc)]
-    _view_sequence(s.fasta_loc, seq_vector, id_vector, s.amino_loc, fontsize * "pt", plot_width, val_mode=val_mode)
-end
-
-function view_sequence(fasta_loc::String, amino_loc::Int=0; fontsize::Int=9, plot_width::Int=800, val_mode=false)
+function view_sequence(fasta_loc::String, amino_loc::Int=0; fontsize::Int=9, plot_width::Int=800, save::Bool=false)
     seq_vector = [FASTA.sequence(String, record) for record in open(FASTA.Reader, fasta_loc)]
     id_vector = [FASTA.identifier(record) for record in open(FASTA.Reader, fasta_loc)]
-    _view_sequence(fasta_loc, seq_vector, id_vector, amino_loc, fontsize, plot_width, val_mode=val_mode)
+    _view_sequence(fasta_loc, seq_vector, id_vector, amino_loc, fontsize, plot_width, save_view=save)
 end
 
 function _view_sequence(fasta_loc::String, seq_vector::Vector{String}, id_vector::Vector{String}, amino_loc::Int=0, fontsize::Int=9, plot_width::Int=800; save_view::Bool=true)
@@ -365,7 +359,7 @@ function data_preprocess_fill(front_ind::Int, last_ind::Int, in_fasta_loc::Strin
     end
 
     if val_mode == false
-        _view_sequence(out_fasta_loc, seq_vector, id_vector, save_view=false)
+        _view_sequence(out_fasta_loc, edit_seq_vector, id_vector, save_view=false)
     end
 end
 
@@ -460,32 +454,6 @@ function _rf_dfpredict(regr::RandomForestRegressor, x::DataFrame)
     return DataFrame(y_pred = DecisionTree.predict(regr, Matrix{Float64}(x)))
 end
 
-function iter_get_reg_importance(s::AbstractRF, x::Matrix{Float64}, y::Vector{Float64}, loc::Vector{Tuple{Int, Char}}, feet::Int, tree::Int, iter::Int;
-    val_mode::Bool=false, split_size::Float64=0.3, show_number::Int=20, imp_iter::Int=60,
-    data_state::Int64=rand(0:typemax(Int64)), imp_state::Int64=rand(0:typemax(Int64)))
-    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=split_size, random_state=data_state)
-    f = zeros(length(loc), iter)
-    n = zeros(iter)
-    loc_list = get_amino_loc(s, loc)
-    for i in 1:iter
-        f[:, i], n[i] = _iter_get_reg_importance(x, x_train, x_test, y_train, y_test, loc_list, feet, tree, imp_iter, imp_state)
-    end
-    mf, sf = mean(f, dims=2)[:, 1], std(f, dims=2)[:, 1]
-
-    if val_mode == false
-        _iter_view_importance(mf, sf, loc_list, show_number=show_number)
-        @printf "NRMSE : %.6f\n" mean(n)
-    end
-
-    return mf, sf
-end
-
-function _iter_get_reg_importance(x::Matrix{Float64}, x_train::Matrix{Float64}, x_test::Matrix{Float64}, y_train::Vector{Float64}, y_test::Vector{Float64}, loc::Vector{String}, feet::Int, tree::Int, imp_iter::Int, imp_state::Int64)
-    regr = RandomForestRegressor(n_trees=tree, n_subfeatures=feet, min_samples_leaf=1)
-    DecisionTree.fit!(regr, x_train, y_train)
-    return _rf_importance(regr, DataFrame(x, loc), imp_iter, seed=imp_state, val_mode=true) , nrmse(regr, x_test, y_test)
-end
-
 function _view_importance(fe::Vector{Float64}, get_loc::Vector{String}, baseline::Float64; show_number::Int=20)
     sorted_idx = sortperm(fe, rev=true)
     bar_pos = [length(sorted_idx):-1:1;] .- 0.5
@@ -515,6 +483,32 @@ function _view_importance(fe::Vector{Float64}, get_loc::Vector{String}; show_num
     close("all")
 end
 
+function iter_get_reg_importance(s::AbstractRF, x::Matrix{Float64}, y::Vector{Float64}, loc::Vector{Tuple{Int, Char}}, feet::Int, tree::Int, iter::Int;
+    val_mode::Bool=false, split_size::Float64=0.3, show_number::Int=20, imp_iter::Int=60,
+    data_state::Int64=rand(0:typemax(Int64)), imp_state::Int64=rand(0:typemax(Int64)))
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=split_size, random_state=data_state)
+    f = zeros(length(loc), iter)
+    n = zeros(iter)
+    loc_list = get_amino_loc(s, loc)
+    for i in 1:iter
+        f[:, i], n[i] = _iter_get_reg_importance(x, x_train, x_test, y_train, y_test, loc_list, feet, tree, imp_iter, imp_state)
+    end
+    mf, sf = mean(f, dims=2)[:, 1], std(f, dims=2)[:, 1]
+
+    if val_mode == false
+        _iter_view_importance(mf, sf, loc_list, show_number=show_number)
+        @printf "NRMSE : %.6f\n" mean(n)
+    end
+
+    return mf, sf
+end
+
+function _iter_get_reg_importance(x::Matrix{Float64}, x_train::Matrix{Float64}, x_test::Matrix{Float64}, y_train::Vector{Float64}, y_test::Vector{Float64}, loc::Vector{String}, feet::Int, tree::Int, imp_iter::Int, imp_state::Int64)
+    regr = RandomForestRegressor(n_trees=tree, n_subfeatures=feet, min_samples_leaf=1)
+    DecisionTree.fit!(regr, x_train, y_train)
+    return _rf_importance(regr, DataFrame(x, loc), imp_iter, seed=imp_state, val_mode=true) , nrmse(regr, x_test, y_test)
+end
+
 function iter_view_importance(s::AbstractRF, loc::Vector{Tuple{Int, Char}}, fe::Vector{Float64}, err::Vector{Float64}; show_number::Int=20)
     _iter_view_importance(fe, err, get_amino_loc(s, loc), show_number=show_number)
 end
@@ -532,6 +526,12 @@ function _iter_view_importance(fe::Vector{Float64}, err::Vector{Float64}, loc::V
     PyPlot.title("Relative Mean Absolute Shapley Value")
     display(gcf())
     close("all")
+end
+
+function view_sequence(s::AbstractRF; fontsize::Int=9, plot_width::Int=800, save::Bool=false)
+    seq_vector = [FASTA.sequence(String, record) for record in open(FASTA.Reader, s.fasta_loc)]
+    id_vector = [FASTA.identifier(record) for record in open(FASTA.Reader, s.fasta_loc)]
+    _view_sequence(s.fasta_loc, seq_vector, id_vector, s.amino_loc, fontsize, plot_width, save_view=save)
 end
 
 # RFI function
