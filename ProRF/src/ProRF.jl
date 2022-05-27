@@ -4,12 +4,12 @@ using ShapML, DataFrames, DecisionTree
 using PyCall, Random, Statistics, Printf, PyPlot, StatsBase
 using FASTX, BioAlignments, XLSX, Phylo, AxisArrays
 
-# export RF, RFI
-# export blosum, get_data, get_amino_loc, view_mutation, view_reg3d, view_importance, view_sequence
-# export train_test_split, nrmse, install_python_dependency
-# export get_reg_importance, iter_get_reg_importance, iter_view_importance
-# export get_reg_value, get_reg_value_loc, iter_get_reg_value, rf_importance
-# export data_preprocess_fill, data_preprocess_index
+export RF, RFI
+export blosum_matrix, get_data, get_amino_loc, view_mutation, view_reg3d, view_importance, view_sequence
+export train_test_split, nrmse, install_python_dependency
+export get_reg_importance, iter_get_reg_importance, iter_view_importance, parallel_predict
+export get_reg_value, get_reg_value_loc, iter_get_reg_value, rf_importance
+export data_preprocess_fill, data_preprocess_index
 
 # Struct defination
 
@@ -67,7 +67,7 @@ end
 function _view_mutation(fasta_loc::String)
     data_len, loc_dict_vector, _ = _location_data(fasta_loc)
     loc_vector = zeros(Int, data_len)
-    loc_hist_vector = Vector()
+    loc_hist_vector = Vector{Int}()
     for dict in loc_dict_vector
         max_value = maximum(values(dict))
         if max_value ≠ data_len
@@ -101,25 +101,40 @@ function nrmse(pre::Vector{Float64}, tru::Vector{Float64})
 end
 
 function nrmse(regr::RandomForestRegressor, test::Matrix{Float64}, tru::Vector{Float64})
-    return L2dist(DecisionTree.predict(regr, test), tru) / (maximum(tru) - minimum(tru)) / length(tru)^0.5
+    return L2dist(parallel_predict(regr, test), tru) / (maximum(tru) - minimum(tru)) / length(tru)^0.5
 end
 
-function predict_data(regr::RandomForestRegressor, test::Matrix{Float64})
-    return DecisionTree.predict(regr, test)
-end
+function parallel_predict(regr::RandomForestRegressor, test::Matrix{Float64})
+    test_vector = [Vector{Float64}(row) for row in eachrow(test)]
+    val_vector = similar(test_vector, Float64)
 
-function predict_data(regr::RandomForestRegressor, loc::Vector{Tuple{Int, Char}}, seq_vector::Vector{String}; blosum::Int=62)
-    test_vector = Vector{Vector{Float64}}()
-    blo = blosum_matrix(blosum)
-    for seq in seq_vector
-        push!(test_vector, [blo[tar, s] for ((_, tar), s) in zip(loc, seq)])
+    Threads.@threads for (ind, vec) in collect(enumerate(test_vector))
+        val_vector[ind] = DecisionTree.predict(regr, vec)
     end
-    return DecisionTree.predict(regr, hcat(test_vector...)')
+    return val_vector
+end
+
+function parallel_predict(regr::RandomForestRegressor, loc::Vector{Tuple{Int, Char}}, seq_vector::Vector{String}; blosum::Int=62)
+    seq_vector = map(x -> x[map(y -> y[1], loc)], seq_vector)
+
+    blo = blosum_matrix(blosum)
+    test_vector = [[Float64(blo[tar, s]) for ((_, tar), s) in zip(loc, seq)] for seq in seq_vector]
+    val_vector = similar(test_vector, Float64)
+    
+    Threads.@threads for (ind, vec) in collect(enumerate(test_vector))
+        val_vector[ind] = DecisionTree.predict(regr, vec)
+    end
+    return val_vector
 end
 
 function view_sequence(fasta_loc::String, amino_loc::Int=0; fontsize::Int=9, plot_width::Int=800, save::Bool=false)
-    seq_vector = [FASTA.sequence(String, record) for record in open(FASTA.Reader, fasta_loc)]
-    id_vector = [FASTA.identifier(record) for record in open(FASTA.Reader, fasta_loc)]
+    seq_vector = Vector{String}()
+    id_vector = Vector{String}()
+
+    for record in open(FASTA.Reader, in_fasta_loc)
+        push!(id_vector, FASTA.identifier(record))
+        push!(seq_vector, FASTA.sequence(String, record))
+    end
     _view_sequence(fasta_loc, seq_vector, id_vector, amino_loc, fontsize, plot_width, save_view=save)
 end
 
@@ -241,7 +256,7 @@ function data_preprocess_index(in_fasta_loc::String; target_rate::Float64=0.3, v
         push!(seq_vector, FASTA.sequence(String, record))
     end
 
-    gap_fre_vector = [get(dict, '-', 0) / data_len for dict in loc_dict_vector]
+    gap_fre_vector = [Float64(get(dict, '-', 0) / data_len) for dict in loc_dict_vector]
 
     front_ind = findfirst(x -> x ≤ target_rate, gap_fre_vector)
     last_ind = findlast(x -> x ≤ target_rate, gap_fre_vector)
@@ -312,10 +327,10 @@ function data_preprocess_fill(front_ind::Int, last_ind::Int, in_fasta_loc::Strin
             if front_gap_ind > 2
                 main_seq = min_target_seq[1:front_gap_ind - 1] * main_seq[front_gap_ind:end]
             end
-
             if last_gap_ind < seq_len - 1
                 main_seq = main_seq[1:last_gap_ind] * min_target_seq[last_gap_ind + 1:end]
             end
+
             @printf "%s --> %s\n" id_vector[min_target_ind] id_vector[ind]
         end
         push!(edit_seq_vector, main_seq)
@@ -412,8 +427,8 @@ function get_reg_importance(s::AbstractRF, x::Matrix{Float64}, y::Vector{Float64
     DecisionTree.fit!(regr, x_train, y_train)
 
     if val_mode == false
-        predict_test = DecisionTree.predict(regr, x_test)
-        predict_train = DecisionTree.predict(regr, x_train)
+        predict_test = parallel_predict(regr, x_test)
+        predict_train = parallel_predict(regr, x_train)
         scatter(y_train, predict_train, color="orange", label="Train value")
         scatter(y_test, predict_test, color="blue" , label="Test value")
         legend(loc=4)
@@ -453,7 +468,7 @@ function _rf_importance(regr::RandomForestRegressor, dx::DataFrame, iter::Int=60
 end
 
 function _rf_dfpredict(regr::RandomForestRegressor, x::DataFrame)
-    return DataFrame(y_pred = DecisionTree.predict(regr, Matrix{Float64}(x)))
+    return DataFrame(y_pred = parallel_predict(regr, Matrix{Float64}(x)))
 end
 
 function _view_importance(fe::Vector{Float64}, get_loc::Vector{String}, baseline::Float64; show_number::Int=20)
@@ -508,7 +523,7 @@ end
 function _iter_get_reg_importance(x::Matrix{Float64}, x_train::Matrix{Float64}, x_test::Matrix{Float64}, y_train::Vector{Float64}, y_test::Vector{Float64}, loc::Vector{String}, feet::Int, tree::Int, imp_iter::Int, imp_state::Int64)
     regr = RandomForestRegressor(n_trees=tree, n_subfeatures=feet, min_samples_leaf=1)
     DecisionTree.fit!(regr, x_train, y_train)
-    return _rf_importance(regr, DataFrame(x, loc), imp_iter, seed=imp_state, val_mode=true) , nrmse(regr, x_test, y_test)
+    return _rf_importance(regr, DataFrame(x, loc), imp_iter, seed=imp_state, val_mode=true), nrmse(regr, x_test, y_test)
 end
 
 function iter_view_importance(s::AbstractRF, loc::Vector{Tuple{Int, Char}}, fe::Vector{Float64}, err::Vector{Float64}; show_number::Int=20)
@@ -531,8 +546,13 @@ function _iter_view_importance(fe::Vector{Float64}, err::Vector{Float64}, loc::V
 end
 
 function view_sequence(s::AbstractRF; fontsize::Int=9, plot_width::Int=800, save::Bool=false)
-    seq_vector = [FASTA.sequence(String, record) for record in open(FASTA.Reader, s.fasta_loc)]
-    id_vector = [FASTA.identifier(record) for record in open(FASTA.Reader, s.fasta_loc)]
+    seq_vector = Vector{String}()
+    id_vector = Vector{String}()
+
+    for record in open(FASTA.Reader, s.fasta_loc)
+        push!(id_vector, FASTA.identifier(record))
+        push!(seq_vector, FASTA.sequence(String, record))
+    end
     _view_sequence(s.fasta_loc, seq_vector, id_vector, s.amino_loc, fontsize, plot_width, save_view=save)
 end
 
