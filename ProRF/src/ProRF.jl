@@ -142,37 +142,6 @@ function install_python_dependency()
     py"_python_install"("bokeh")
 end
 
-function _location_data(fasta_loc::String)
-    seq_vector = [collect(FASTA.sequence(String, record)) for record in open(FASTA.Reader, fasta_loc)]
-    if length(Set(map(length, seq_vector))) ≠ 1
-        error(@sprintf "%s is not aligned, Please align your data" fasta_loc)
-    end
-    seq_matrix = permutedims(hcat(seq_vector...))
-    loc_vector = Vector{Dict{Char, Int}}()
-    for col in eachcol(seq_matrix)
-        loc_dict = Dict{Char, Int}()
-        for val in col
-            loc_dict[val] = get(loc_dict, val, 0) + 1
-        end
-        push!(loc_vector, loc_dict)
-    end
-    return size(seq_matrix)[1], loc_vector, seq_matrix
-end
-
-function _find_key(d::Dict{Char, Int}, tar::Int)
-    for k in keys(d)
-        if d[k] == tar
-            return k
-        end
-    end
-end
-
-function _min_max_norm(ve::Vector{Float64})
-    mi = minimum(ve)
-    ma = maximum(ve)
-    return [(i - mi) / (ma - mi) for i in ve]
-end
-
 function __init__()
     py"""
     def _python_install(package):
@@ -399,6 +368,37 @@ function _get_data(s::AbstractRF, ami_arr::Int, excel_col::Char, norm::Bool, blo
     return x, y, l
 end
 
+function _location_data(fasta_loc::String)
+    seq_vector = [collect(FASTA.sequence(String, record)) for record in open(FASTA.Reader, fasta_loc)]
+    if length(Set(map(length, seq_vector))) ≠ 1
+        error(@sprintf "%s is not aligned, Please align your data" fasta_loc)
+    end
+    seq_matrix = permutedims(hcat(seq_vector...))
+    loc_vector = Vector{Dict{Char, Int}}()
+    for col in eachcol(seq_matrix)
+        loc_dict = Dict{Char, Int}()
+        for val in col
+            loc_dict[val] = get(loc_dict, val, 0) + 1
+        end
+        push!(loc_vector, loc_dict)
+    end
+    return size(seq_matrix)[1], loc_vector, seq_matrix
+end
+
+function _find_key(d::Dict{Char, Int}, tar::Int)
+    for k in keys(d)
+        if d[k] == tar
+            return k
+        end
+    end
+end
+
+function _min_max_norm(ve::Vector{Float64})
+    mi = minimum(ve)
+    ma = maximum(ve)
+    return [(i - mi) / (ma - mi) for i in ve]
+end
+
 function get_amino_loc(s::AbstractRF, loc::Vector{Tuple{Int, Char}})
     return [string(i[1] + s.amino_loc - 1) for i in loc]
 end
@@ -414,7 +414,9 @@ function get_reg_importance(s::AbstractRF, x::Matrix{Float64}, y::Vector{Float64
     if val_mode == false
         predict_test = DecisionTree.predict(regr, x_test)
         predict_train = DecisionTree.predict(regr, x_train)
-        scatter(vcat(y_train, y_test), vcat(predict_train, predict_test), color=vcat(["orange" for i = 1:length(y_train)], ["blue" for i = 1:length(y_test)]))
+        scatter(y_train, predict_train, color="orange", label="Train value")
+        scatter(y_test, predict_test, color="blue" , label="Test value")
+        legend(loc=4)
         PyPlot.title("Random Forest Regression Result")
         xlabel("True Values")
         ylabel("Predictions")
@@ -598,4 +600,4 @@ function iter_get_reg_value(si::AbstractRFI, x::Matrix{Float64}, y::Vector{Float
     return vz, sz
 end
 
-end
+end # module end
